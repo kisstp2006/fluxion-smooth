@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: BSD-2-Clause
+
+.{
+    .name = .fluxion_smooth,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.17.0",
+    .fingerprint = 0xb3d123f40e189cf5,
+    // Each at the commit the engine pins, so a program gets one copy of it.
+    .dependencies = .{
+        // Matrices and vectors: the jitter's projection.
+        .fluxion_math = .{
+            .url = "git+https://github.com/kisstp2006/fluxion-math#f293d43436e9c8f8fb2fb656732792597cf5ddfe",
+            .hash = "fluxion_math-0.3.0-dfpZBcFUBAC-eB5TEpCW-PdkIUGEurBEI8cTvyvbFc_r",
+        },
+        // For the tests only: the shader parts compiled for every backend,
+        // and the GPU side built over a device that draws nothing. A program
+        // builds `src/render/rhi.zig` with its own.
+        .fluxion_shader = .{
+            .url = "git+https://github.com/kisstp2006/fluxion-shader#2c6ebd40c82cbe18d118a4996bc6fdc69927cfdc",
+            .hash = "fluxion_shader-0.2.1-FqFMErMrCADRWA_2-yZyUyJepVkybPNiuhJPE6wZWX9j",
+        },
+        .fluxion_rhi = .{
+            .url = "git+https://github.com/kisstp2006/fluxion-rhi#0af6e2f09a58728859523e8e51106b7cc6c8b393",
+            .hash = "fluxion_rhi-0.2.3--pvwD7S2EQCCa6c5xzZ5osqU-LHP41yZv98qCyQbi2E7",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "tools",
+        "README.md",
+        "LICENSE",
+    },
+}
