@@ -54,6 +54,8 @@ pub const Histories = struct {
         textures: [2]rhi.Texture,
         width: u32,
         height: u32,
+        /// Slices of a volume; nought for a picture.
+        depth: u32 = 0,
         format: rhi.Format,
         /// Which of the two is `next` this frame.
         next: u1 = 0,
@@ -73,20 +75,30 @@ pub const Histories = struct {
     /// the first time, and again when the size or format changes. Asked for
     /// twice in a frame, it is the same pair both times.
     pub fn pair(self: *Histories, gpa: Allocator, device: *rhi.Device, key: Key, width: u32, height: u32, format: rhi.Format) (Allocator.Error || rhi.Error)!Pair {
+        return self.pairOf(gpa, device, key, width, height, 0, format);
+    }
+
+    /// The same for volumes of `depth` slices: what a view gathers in a
+    /// grid fitted to it - fog in froxels.
+    pub fn volumes(self: *Histories, gpa: Allocator, device: *rhi.Device, key: Key, width: u32, height: u32, depth: u32, format: rhi.Format) (Allocator.Error || rhi.Error)!Pair {
+        return self.pairOf(gpa, device, key, width, height, @max(depth, 1), format);
+    }
+
+    fn pairOf(self: *Histories, gpa: Allocator, device: *rhi.Device, key: Key, width: u32, height: u32, depth: u32, format: rhi.Format) (Allocator.Error || rhi.Error)!Pair {
         const found = try self.kept.getOrPut(gpa, key);
         var fresh = false;
         if (found.found_existing) {
             const held = found.value_ptr;
-            if (held.width != width or held.height != height or held.format != format) {
+            if (held.width != width or held.height != height or held.depth != depth or held.format != format) {
                 for (held.textures) |t| device.destroyTexture(t);
-                found.value_ptr.* = try make(device, width, height, format);
+                found.value_ptr.* = try make(device, width, height, depth, format);
                 fresh = true;
             } else if (held.used != self.frame) {
                 held.next ^= 1;
             }
         } else {
             errdefer _ = self.kept.swapRemove(key);
-            found.value_ptr.* = try make(device, width, height, format);
+            found.value_ptr.* = try make(device, width, height, depth, format);
             fresh = true;
         }
         const held = found.value_ptr;
@@ -94,12 +106,14 @@ pub const Histories = struct {
         return .{ .previous = held.textures[held.next ^ 1], .next = held.textures[held.next], .fresh = fresh };
     }
 
-    fn make(device: *rhi.Device, width: u32, height: u32, format: rhi.Format) rhi.Error!Kept {
+    fn make(device: *rhi.Device, width: u32, height: u32, depth: u32, format: rhi.Format) rhi.Error!Kept {
         var textures: [2]rhi.Texture = undefined;
         for (&textures, 0..) |*t, i| {
             t.* = device.createTexture(.{
+                .dimension = if (depth > 0) .d3 else .d2,
                 .width = width,
                 .height = height,
+                .depth_or_layers = @max(depth, 1),
                 .format = format,
                 .usage = .{ .sampled = true, .render_target = true },
                 .label = if (i == 0) "fluxion-smooth history a" else "fluxion-smooth history b",
@@ -108,7 +122,7 @@ pub const Histories = struct {
                 return err;
             };
         }
-        return .{ .textures = textures, .width = width, .height = height, .format = format };
+        return .{ .textures = textures, .width = width, .height = height, .depth = depth, .format = format };
     }
 
     /// The frame is over: the pairs not asked for lately let go of.
@@ -197,6 +211,22 @@ const every_part = "attribute vec2 corner : 0;\n" ++
     \\}
     \\
 ;
+
+test "a view keeps volumes as it keeps pictures, made again at another depth" {
+    var d = try nullDevice();
+    defer d.deinit();
+    var pictures: Histories = .{};
+    defer pictures.deinit(testing.allocator, &d);
+    const key: Key = .{ .view = 2, .slot = 1 };
+    const first = try pictures.volumes(testing.allocator, &d, key, 16, 9, 64, .rgba16_float);
+    try testing.expect(first.fresh);
+    try testing.expectEqual(@as(u32, 64), (try d.textureInfo(first.next)).depth_or_layers);
+    pictures.endFrame(&d);
+    const second = try pictures.volumes(testing.allocator, &d, key, 16, 9, 64, .rgba16_float);
+    try testing.expect(!second.fresh and std.meta.eql(second.previous, first.next));
+    pictures.endFrame(&d);
+    try testing.expect((try pictures.volumes(testing.allocator, &d, key, 16, 9, 32, .rgba16_float)).fresh);
+}
 
 test "every part compiles for every backend" {
     var said: std.Io.Writer.Allocating = .init(testing.allocator);

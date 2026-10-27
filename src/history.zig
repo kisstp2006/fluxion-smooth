@@ -84,7 +84,10 @@ pub const Tracker = struct {
             view.view_projection = view_projection;
             return .{ .previous = view.previous, .fresh = view.frames == 1, .frames = view.frames };
         }
-        const fresh = view.cut or view.width != width or view.height != height or self.frame - view.seen > 1;
+        // A view drawn only now and then - a tool's, a picture in picture -
+        // takes up what it gathered where it left off: last frame's view is
+        // the one it was last drawn through.
+        const fresh = view.cut or view.width != width or view.height != height;
         const previous = if (fresh) view_projection else view.view_projection;
         view.* = .{ .view_projection = view_projection, .previous = previous, .width = width, .height = height, .frames = if (fresh) 1 else view.frames + 1, .seen = self.frame };
         return .{ .previous = previous, .fresh = fresh, .frames = view.frames };
@@ -144,14 +147,16 @@ test "a view seen twice in a frame - its picture taken after it was drawn - is t
     try testing.expect(!again.fresh and again.frames == first.frames);
 }
 
-test "a view missed for a frame starts again, and one unseen for long is forgotten" {
+test "a view missed for a frame goes on from where it was, and one unseen for long is forgotten" {
     var tracker: Tracker = .{};
     defer tracker.deinit(testing.allocator);
+    const a = Mat4.fromTranslation(.init(1, 0, 0));
     tracker.beginFrame();
-    _ = try tracker.see(testing.allocator, 1, .identity, 64, 64);
+    _ = try tracker.see(testing.allocator, 1, a, 64, 64);
     tracker.beginFrame();
     tracker.beginFrame();
-    try testing.expect((try tracker.see(testing.allocator, 1, .identity, 64, 64)).fresh);
+    const later = try tracker.see(testing.allocator, 1, .identity, 64, 64);
+    try testing.expect(!later.fresh and later.previous.eql(a) and later.frames == 2);
     for (0..forget_after + 1) |_| tracker.beginFrame();
     try testing.expect(!tracker.knows(1));
 }
