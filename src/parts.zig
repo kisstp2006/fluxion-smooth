@@ -14,6 +14,9 @@
 //!   spread of its neighbours - what keeps history from ghosting.
 //! - `filter`: how much a neighbour counts when blurring: by depth, by
 //!   normal, by brightness, and the à-trous kernel's weights.
+//! - `resolve`: temporal antialiasing's step - this frame's jittered
+//!   picture added to what was gathered, taken back along each pixel's
+//!   motion and clipped to its neighbours.
 
 const std = @import("std");
 
@@ -200,6 +203,93 @@ pub fn upsample(comptime name: []const u8, comptime low: []const u8, comptime lo
         "        return sample_level(" ++ low ++ ", nearest_uv, 0.0);\n" ++
         \\    }
         \\    return sum / total;
+        \\}
+        \\
+        \\
+    ;
+}
+
+/// `vec4 <name>(vec2 uv, vec2 size, vec2 jitter, float blend)`: temporal
+/// antialiasing's step for the pixel at `uv` of a picture `size` texels
+/// across - this frame's `current`, drawn through a projection moved by
+/// `jitter` pixels (in the texture's own directions), added to `history`,
+/// what was gathered up to last frame. `blend` is how much of a still
+/// pixel this frame makes, a tenth or so; one where there is no history.
+///
+/// - The pixel is this frame's three by three neighbours weighted by how
+///   near each was drawn to the pixel's middle once the jitter is taken
+///   off (Karis 2014), so the picture does not shake with it.
+/// - It is taken back along the motion - `motion`'s `xy`, from nought to
+///   one in the texture's own measure - of the neighbour nearest the
+///   camera by `depth`'s `channel` (linear, nought for nothing drawn): an
+///   edge moving over a far wall drags no trail.
+/// - History is read through a Catmull-Rom spline, and clipped into the
+///   box its neighbours spread over in YCoCg (Salvi, Karis), wider where
+///   the pixel stands still and narrower as it moves. Off the screen it is
+///   let go of.
+/// - Colours are added up weighted by brightness (`smoothLumaWeight`), so
+///   a bright speck does not flicker; a moving pixel takes more of this
+///   frame, which keeps it sharp.
+///
+/// The alpha is this frame's. Wants `clip` and `reproject`.
+pub fn resolve(comptime name: []const u8, comptime current: []const u8, comptime history: []const u8, comptime motion: []const u8, comptime depth: []const u8, comptime channel: []const u8) []const u8 {
+    return catmullRom(name ++ "History", history) ++
+        "// Temporal antialiasing: `" ++ current ++ "` added to `" ++ history ++ "` along `" ++ motion ++ "`.\n" ++
+        "vec4 " ++ name ++ "(vec2 uv, vec2 size, vec2 jitter, float blend) {\n" ++
+        \\    vec2 texel = vec2(1.0) / size;
+        \\    vec3 m1 = vec3(0.0);
+        \\    vec3 m2 = vec3(0.0);
+        \\    vec3 filtered = vec3(0.0);
+        \\    float filtered_weight = 0.0;
+        \\    float nearest = 1000000000.0;
+        \\    vec2 nearest_uv = uv;
+        \\
+    ++
+        "    vec4 middle = sample_level(" ++ current ++ ", uv, 0.0);\n" ++
+        \\    for (int i = 0; i < 9; i = i + 1) {
+        \\        vec2 o = vec2(float(i - (i / 3) * 3 - 1), float(i / 3 - 1));
+        \\        vec2 at = uv + o * texel;
+        \\
+    ++
+        "        vec3 c = smoothToYCoCg(max(sample_level(" ++ current ++ ", at, 0.0).rgb, vec3(0.0)));\n" ++
+        \\        c = c * smoothLumaWeight(c.x);
+        \\        m1 = m1 + c;
+        \\        m2 = m2 + c * c;
+        \\        vec2 off = o - jitter;
+        \\        float w = exp(-2.29 * dot(off, off));
+        \\        filtered = filtered + c * w;
+        \\        filtered_weight = filtered_weight + w;
+        \\
+    ++
+        "        float z = sample_level(" ++ depth ++ ", at, 0.0)." ++ channel ++ ";\n" ++
+        \\        if (z <= 0.0) {
+        \\            z = 1000000000.0;
+        \\        }
+        \\        if (z < nearest) {
+        \\            nearest = z;
+        \\            nearest_uv = at;
+        \\        }
+        \\    }
+        \\    vec3 mean = m1 / 9.0;
+        \\    vec3 sigma = sqrt(max(m2 / 9.0 - mean * mean, vec3(0.0)));
+        \\    vec3 now = filtered / max(filtered_weight, 0.0001);
+        \\
+    ++
+        "    vec2 moved = sample_level(" ++ motion ++ ", nearest_uv, 0.0).xy;\n" ++
+        \\    vec2 back = uv - moved;
+        \\    float speed = clamp(length(moved * size) * 0.125, 0.0, 1.0);
+        \\    float alpha = clamp(mix(blend, max(blend, 0.25), speed), 0.0, 1.0);
+        \\    if (smoothOnScreen(back) < 0.5) {
+        \\        alpha = 1.0;
+        \\    }
+        \\
+    ++
+        "    vec3 before = smoothToYCoCg(" ++ name ++ "History(back, size).rgb);\n" ++
+        \\    before = before * smoothLumaWeight(before.x);
+        \\    before = smoothClip(before, mean, sigma, mix(1.25, 0.85, speed));
+        \\    vec3 gathered = mix(before, now, alpha);
+        \\    gathered = gathered / max(1.0 - gathered.x, 0.0001);
+        \\    return vec4(max(smoothFromYCoCg(gathered), vec3(0.0)), middle.a);
         \\}
         \\
         \\

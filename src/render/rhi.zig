@@ -176,9 +176,11 @@ const every_part = "attribute vec2 corner : 0;\n" ++
     "texture2d history : 0;\n" ++
     "texture2d low : 1;\n" ++
     "texture2d low_depth : 2;\n" ++
+    "texture2d motion : 3;\n" ++
     smooth.parts.all ++
     smooth.parts.catmullRom("smoothHistory", "history") ++
     smooth.parts.upsample("smoothUp", "low", "low_depth") ++
+    smooth.parts.resolve("smoothResolve", "low", "history", "motion", "low_depth", "z") ++
     \\vertex {
     \\    uv = corner;
     \\    position = vec4(corner * 2.0 - vec2(1.0), 0.0, 1.0);
@@ -191,7 +193,7 @@ const every_part = "attribute vec2 corner : 0;\n" ++
     \\    c = smoothClip(c, vec3(0.5), vec3(0.1), 1.25) * smoothLumaWeight(c.x);
     \\    float w = smoothDepthWeight(1.0, n, 8.0) * smoothNormalWeight(vec3(0.0, 1.0, 0.0), vec3(0.0, 0.8, 0.6), 8.0)
     \\        * smoothLuminanceWeight(0.5, n, 0.2) * smoothAtrous(1.0);
-    \\    target = vec4(smoothFromYCoCg(c) * w, 1.0) + smoothUp(uv, vec2(256.0), knobs.z);
+    \\    target = vec4(smoothFromYCoCg(c) * w, 1.0) + smoothUp(uv, vec2(256.0), knobs.z) + smoothResolve(uv, vec2(512.0), knobs.xy, knobs.w);
     \\}
     \\
 ;

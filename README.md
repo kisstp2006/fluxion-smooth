@@ -22,6 +22,7 @@ The shader parts are:
 - **Catmull-Rom reading:** five bilinear reads, so a reprojected picture stays sharp.
 - **Edge-aware filter weights:** by depth, by normal and by brightness, plus the à-trous kernel.
 - **Upsampling:** an effect drawn at a lower size brought up by depth, nearest in depth at an edge.
+- **Temporal antialiasing's resolve** (`parts.resolve`): this frame's jittered picture, its jitter filtered off, added to the history taken back along the motion of the nearest neighbour, clipped in YCoCg and weighted by brightness.
 
 ```zig
 const smooth = @import("fluxion_smooth");
