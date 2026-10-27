@@ -17,6 +17,9 @@
 //! - `resolve`: temporal antialiasing's step - this frame's jittered
 //!   picture added to what was gathered, taken back along each pixel's
 //!   motion and clipped to its neighbours.
+//! - `gather`: the same for an effect's own picture - the screen's
+//!   occlusion, the light in the air - whatever its size: no jitter of its
+//!   own to filter off, only its noise to gather away.
 
 const std = @import("std");
 
@@ -290,6 +293,50 @@ pub fn resolve(comptime name: []const u8, comptime current: []const u8, comptime
         \\    vec3 gathered = mix(before, now, alpha);
         \\    gathered = gathered / max(1.0 - gathered.x, 0.0001);
         \\    return vec4(max(smoothFromYCoCg(gathered), vec3(0.0)), middle.a);
+        \\}
+        \\
+        \\
+    ;
+}
+
+/// `vec4 <name>(vec2 uv, vec2 size, float blend)`: an effect's picture -
+/// `current`, `size` texels across, its noise moved on each frame - added
+/// to `history`, what it gathered up to last frame, taken back along the
+/// screen's motion (`motion`'s `xy`, in the texture's own measure, read
+/// where the effect's pixel is) and clipped into the box its three by three
+/// neighbours spread over, so what moved away leaves no trail. `blend` is
+/// how much of it this frame makes; one where there is no history, and off
+/// the screen. Wants `clip` and `reproject`.
+pub fn gather(comptime name: []const u8, comptime current: []const u8, comptime history: []const u8, comptime motion: []const u8) []const u8 {
+    return "// `" ++ current ++ "` gathered into `" ++ history ++ "` along `" ++ motion ++ "`.\n" ++
+        "vec4 " ++ name ++ "(vec2 uv, vec2 size, float blend) {\n" ++
+        \\    vec2 texel = vec2(1.0) / size;
+        \\    vec4 m1 = vec4(0.0);
+        \\    vec4 m2 = vec4(0.0);
+        \\
+    ++
+        "    vec4 middle = sample_level(" ++ current ++ ", uv, 0.0);\n" ++
+        \\    for (int i = 0; i < 9; i = i + 1) {
+        \\        vec2 o = vec2(float(i - (i / 3) * 3 - 1), float(i / 3 - 1));
+        \\
+    ++
+        "        vec4 c = sample_level(" ++ current ++ ", uv + o * texel, 0.0);\n" ++
+        \\        m1 = m1 + c;
+        \\        m2 = m2 + c * c;
+        \\    }
+        \\    vec4 mean = m1 / 9.0;
+        \\    vec4 sigma = sqrt(max(m2 / 9.0 - mean * mean, vec4(0.0)));
+        \\
+    ++
+        "    vec2 back = uv - sample_level(" ++ motion ++ ", uv, 0.0).xy;\n" ++
+        \\    if (blend >= 1.0 || smoothOnScreen(back) < 0.5) {
+        \\        return middle;
+        \\    }
+        \\
+    ++
+        "    vec4 before = sample_level(" ++ history ++ ", back, 0.0);\n" ++
+        \\    before = vec4(smoothClip(before.rgb, mean.rgb, sigma.rgb, 1.0), clamp(before.a, mean.a - sigma.a, mean.a + sigma.a));
+        \\    return mix(before, middle, blend);
         \\}
         \\
         \\

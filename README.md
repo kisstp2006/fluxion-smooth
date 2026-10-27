@@ -22,6 +22,7 @@ The shader parts are:
 - **Catmull-Rom reading:** five bilinear reads, so a reprojected picture stays sharp.
 - **Edge-aware filter weights:** by depth, by normal and by brightness, plus the à-trous kernel.
 - **Upsampling:** an effect drawn at a lower size brought up by depth, nearest in depth at an edge.
+- **An effect's own gathering** (`parts.gather`): a picture whose noise moves on each frame - the screen's occlusion, the light in the air - added to what it gathered, taken back along the motion and clipped to its neighbours.
 - **Temporal antialiasing's resolve** (`parts.resolve`): this frame's jittered picture, its jitter filtered off, added to the history taken back along the motion of the nearest neighbour, clipped in YCoCg and weighted by brightness.
 
 ```zig
