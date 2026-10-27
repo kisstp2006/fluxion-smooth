@@ -33,6 +33,9 @@ pub const Tracker = struct {
 
     pub const View = struct {
         view_projection: Mat4,
+        /// What it was told it saw last frame, the first time it was seen
+        /// this frame: what it is told again if seen again this frame.
+        previous: Mat4,
         width: u32,
         height: u32,
         /// How many frames in a row it has gathered.
@@ -71,13 +74,19 @@ pub const Tracker = struct {
     pub fn see(self: *Tracker, gpa: Allocator, key: u64, view_projection: Mat4, width: u32, height: u32) Allocator.Error!Seen {
         const found = try self.views.getOrPut(gpa, key);
         if (!found.found_existing) {
-            found.value_ptr.* = .{ .view_projection = view_projection, .width = width, .height = height, .frames = 1, .seen = self.frame };
+            found.value_ptr.* = .{ .view_projection = view_projection, .previous = view_projection, .width = width, .height = height, .frames = 1, .seen = self.frame };
             return .{ .previous = view_projection, .fresh = true, .frames = 1 };
         }
         const view = found.value_ptr;
+        // Seen again this frame - a picture of the frame taken after it was
+        // drawn: told what it was told the first time.
+        if (view.seen == self.frame and !view.cut and view.width == width and view.height == height) {
+            view.view_projection = view_projection;
+            return .{ .previous = view.previous, .fresh = view.frames == 1, .frames = view.frames };
+        }
         const fresh = view.cut or view.width != width or view.height != height or self.frame - view.seen > 1;
         const previous = if (fresh) view_projection else view.view_projection;
-        view.* = .{ .view_projection = view_projection, .width = width, .height = height, .frames = if (fresh) 1 else view.frames + 1, .seen = self.frame };
+        view.* = .{ .view_projection = view_projection, .previous = previous, .width = width, .height = height, .frames = if (fresh) 1 else view.frames + 1, .seen = self.frame };
         return .{ .previous = previous, .fresh = fresh, .frames = view.frames };
     }
 
@@ -119,6 +128,20 @@ test "a view is fresh when new, resized or cut, and gathers frame after frame ot
     try testing.expect(after.fresh and after.previous.eql(a));
     tracker.beginFrame();
     try testing.expect(!(try tracker.see(testing.allocator, 7, a, 800, 480)).fresh);
+}
+
+test "a view seen twice in a frame - its picture taken after it was drawn - is told the same both times" {
+    var tracker: Tracker = .{};
+    defer tracker.deinit(testing.allocator);
+    const a = Mat4.fromTranslation(.init(1, 0, 0));
+    const b = Mat4.fromTranslation(.init(2, 0, 0));
+    tracker.beginFrame();
+    _ = try tracker.see(testing.allocator, 3, a, 64, 64);
+    tracker.beginFrame();
+    const first = try tracker.see(testing.allocator, 3, b, 64, 64);
+    const again = try tracker.see(testing.allocator, 3, b, 64, 64);
+    try testing.expect(first.previous.eql(a) and again.previous.eql(a));
+    try testing.expect(!again.fresh and again.frames == first.frames);
 }
 
 test "a view missed for a frame starts again, and one unseen for long is forgotten" {
