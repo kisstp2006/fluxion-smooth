@@ -20,6 +20,10 @@
 //! - `gather`: the same for an effect's own picture - the screen's
 //!   occlusion, the light in the air - whatever its size: no jitter of its
 //!   own to filter off, only its noise to gather away.
+//! - `upscale`: temporal antialiasing that gathers at a larger size than
+//!   the frame is drawn at - each frame's jittered pixels put where they
+//!   were drawn, so that over frames the larger picture fills in (the
+//!   principle of AMD's FSR 2).
 
 const std = @import("std");
 
@@ -293,6 +297,103 @@ pub fn resolve(comptime name: []const u8, comptime current: []const u8, comptime
         \\    vec3 gathered = mix(before, now, alpha);
         \\    gathered = gathered / max(1.0 - gathered.x, 0.0001);
         \\    return vec4(max(smoothFromYCoCg(gathered), vec3(0.0)), middle.a);
+        \\}
+        \\
+        \\
+    ;
+}
+
+/// `vec4 <name>(vec2 uv, vec2 size, vec2 low_size, vec2 jitter, float
+/// blend)`: temporal antialiasing that gathers a picture `size` texels
+/// across out of `current`, drawn at `low_size` - smaller - through a
+/// projection moved by `jitter` of its pixels (in the texture's own
+/// directions); `history` is what was gathered up to last frame, at
+/// `size`. `blend` is how much of a still pixel a frame whose pixel was
+/// drawn right on this one's middle makes; one where there is no history.
+///
+/// - Each of the three by three drawn pixels nearest this one counts by
+///   how near its middle, once the jitter is taken off, came to this
+///   pixel's - measured in this picture's pixels, so a drawn pixel speaks
+///   for the larger pixels it was drawn over, the nearest most.
+/// - How much this frame makes is `blend` times how near the nearest was:
+///   a larger pixel that no drawn one came near this frame keeps what it
+///   gathered, and another frame's jitter fills it in (AMD's FSR 2).
+/// - Taken back along the motion of the neighbour nearest the camera,
+///   read through a Catmull-Rom spline, clipped into the drawn
+///   neighbours' box in YCoCg and added up weighted by brightness, as
+///   `resolve` does.
+/// - With no history, and off the screen, the drawn pixels are spread
+///   smoothly over the larger ones.
+///
+/// The alpha is the nearest drawn pixel's. Wants `clip` and `reproject`.
+pub fn upscale(comptime name: []const u8, comptime current: []const u8, comptime history: []const u8, comptime motion: []const u8, comptime depth: []const u8, comptime channel: []const u8) []const u8 {
+    return catmullRom(name ++ "History", history) ++
+        "// Temporal upscaling: `" ++ current ++ "` gathered into `" ++ history ++ "`, larger, along `" ++ motion ++ "`.\n" ++
+        "vec4 " ++ name ++ "(vec2 uv, vec2 size, vec2 low_size, vec2 jitter, float blend) {\n" ++
+        \\    vec2 ratio = max(size / low_size, vec2(1.0));
+        \\    vec2 at = uv * low_size;
+        \\    vec2 base = floor(at + jitter);
+        \\    vec3 m1 = vec3(0.0);
+        \\    vec3 m2 = vec3(0.0);
+        \\    vec3 sharp = vec3(0.0);
+        \\    float sharp_weight = 0.0;
+        \\    vec3 wide = vec3(0.0);
+        \\    float wide_weight = 0.0;
+        \\    float nearest = 1000000000.0;
+        \\    vec2 nearest_uv = (base + vec2(0.5)) / low_size;
+        \\    for (int i = 0; i < 9; i = i + 1) {
+        \\        vec2 o = vec2(float(i - (i / 3) * 3 - 1), float(i / 3 - 1));
+        \\        vec2 texel = base + o;
+        \\        vec2 drawn = (texel + vec2(0.5)) / low_size;
+        \\
+    ++
+        "        vec3 c = smoothToYCoCg(max(sample_level(" ++ current ++ ", drawn, 0.0).rgb, vec3(0.0)));\n" ++
+        \\        c = c * smoothLumaWeight(c.x);
+        \\        m1 = m1 + c;
+        \\        m2 = m2 + c * c;
+        \\        vec2 off = texel + vec2(0.5) - jitter - at;
+        \\        vec2 near = off * ratio;
+        \\        float w = exp(-2.29 * dot(near, near));
+        \\        sharp = sharp + c * w;
+        \\        sharp_weight = sharp_weight + w;
+        \\        float v = exp(-2.29 * dot(off, off));
+        \\        wide = wide + c * v;
+        \\        wide_weight = wide_weight + v;
+        \\
+    ++
+        "        float z = sample_level(" ++ depth ++ ", drawn, 0.0)." ++ channel ++ ";\n" ++
+        \\        if (z <= 0.0) {
+        \\            z = 1000000000.0;
+        \\        }
+        \\        if (z < nearest) {
+        \\            nearest = z;
+        \\            nearest_uv = drawn;
+        \\        }
+        \\    }
+        \\    vec3 mean = m1 / 9.0;
+        \\    vec3 sigma = sqrt(max(m2 / 9.0 - mean * mean, vec3(0.0)));
+        \\    vec3 spread = wide / max(wide_weight, 0.0001);
+        \\    vec3 now = (sharp + wide * 0.02) / max(sharp_weight + wide_weight * 0.02, 0.0001);
+        \\    float confidence = clamp(sharp_weight, 0.0, 1.0);
+        \\
+    ++
+        "    float alpha_now = sample_level(" ++ current ++ ", (base + vec2(0.5)) / low_size, 0.0).a;\n" ++
+        "    vec2 moved = sample_level(" ++ motion ++ ", nearest_uv, 0.0).xy;\n" ++
+        \\    vec2 back = uv - moved;
+        \\    if (blend >= 1.0 || smoothOnScreen(back) < 0.5) {
+        \\        spread = spread / max(1.0 - spread.x, 0.0001);
+        \\        return vec4(max(smoothFromYCoCg(spread), vec3(0.0)), alpha_now);
+        \\    }
+        \\    float speed = clamp(length(moved * size) * 0.125, 0.0, 1.0);
+        \\    float alpha = clamp(mix(blend, max(blend, 0.25), speed) * confidence, 0.0, 1.0);
+        \\
+    ++
+        "    vec3 before = smoothToYCoCg(" ++ name ++ "History(back, size).rgb);\n" ++
+        \\    before = before * smoothLumaWeight(before.x);
+        \\    before = smoothClip(before, mean, sigma, mix(1.25, 0.85, speed));
+        \\    vec3 gathered = mix(before, now, alpha);
+        \\    gathered = gathered / max(1.0 - gathered.x, 0.0001);
+        \\    return vec4(max(smoothFromYCoCg(gathered), vec3(0.0)), alpha_now);
         \\}
         \\
         \\

@@ -38,6 +38,15 @@ pub const Jitter = struct {
     /// most engines take, sixteen covers a pixel more finely.
     length: u32 = 8,
 
+    /// For a picture gathered `ratio` times as large across as it is drawn:
+    /// a cycle long enough that every gathered pixel has drawn ones come
+    /// near it - eight frames times the ratio squared (AMD's FSR 2), from
+    /// eight to sixty-four.
+    pub fn upscaling(ratio: f32) Jitter {
+        const wanted = @ceil(8 * @max(ratio, 1) * @max(ratio, 1));
+        return .{ .length = @intFromFloat(std.math.clamp(wanted, 8, 64)) };
+    }
+
     /// Frame `frame`'s offset, in pixels, each from minus a half to a half.
     pub fn offset(self: Jitter, frame: u64) [2]f32 {
         const at: u32 = @intCast(frame % @max(self.length, 1) + 1);
@@ -92,4 +101,12 @@ test "a point drawn through the moved projection lands its offset in pixels asid
         try testing.expectApproxEqAbs(o[1], (moved.y - plain.y) * height / 2, 1e-3);
         try testing.expectApproxEqAbs(plain.z, moved.z, 1e-6);
     }
+}
+
+test "a picture gathered larger than it is drawn takes a longer cycle" {
+    try testing.expectEqual(@as(u32, 8), Jitter.upscaling(1).length);
+    try testing.expectEqual(@as(u32, 8), Jitter.upscaling(0.5).length);
+    try testing.expectEqual(@as(u32, 18), Jitter.upscaling(1.5).length);
+    try testing.expectEqual(@as(u32, 32), Jitter.upscaling(2).length);
+    try testing.expectEqual(@as(u32, 64), Jitter.upscaling(4).length);
 }

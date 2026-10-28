@@ -196,6 +196,7 @@ const every_part = "attribute vec2 corner : 0;\n" ++
     smooth.parts.upsample("smoothUp", "low", "low_depth") ++
     smooth.parts.resolve("smoothResolve", "low", "history", "motion", "low_depth", "z") ++
     smooth.parts.gather("smoothGather", "low", "history", "motion") ++
+    smooth.parts.upscale("smoothUpscale", "low", "history", "motion", "low_depth", "z") ++
     \\vertex {
     \\    uv = corner;
     \\    position = vec4(corner * 2.0 - vec2(1.0), 0.0, 1.0);
@@ -208,7 +209,7 @@ const every_part = "attribute vec2 corner : 0;\n" ++
     \\    c = smoothClip(c, vec3(0.5), vec3(0.1), 1.25) * smoothLumaWeight(c.x);
     \\    float w = smoothDepthWeight(1.0, n, 8.0) * smoothNormalWeight(vec3(0.0, 1.0, 0.0), vec3(0.0, 0.8, 0.6), 8.0)
     \\        * smoothLuminanceWeight(0.5, n, 0.2) * smoothAtrous(1.0);
-    \\    target = vec4(smoothFromYCoCg(c) * w, 1.0) + smoothUp(uv, vec2(256.0), knobs.z) + smoothResolve(uv, vec2(512.0), knobs.xy, knobs.w) + smoothGather(uv, vec2(256.0), knobs.x);
+    \\    target = vec4(smoothFromYCoCg(c) * w, 1.0) + smoothUp(uv, vec2(256.0), knobs.z) + smoothResolve(uv, vec2(512.0), knobs.xy, knobs.w) + smoothGather(uv, vec2(256.0), knobs.x) + smoothUpscale(uv, vec2(512.0), vec2(256.0), knobs.xy, knobs.w);
     \\}
     \\
 ;
