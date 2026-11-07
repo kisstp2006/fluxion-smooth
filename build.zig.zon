@@ -9,8 +9,8 @@
     .dependencies = .{
         // Matrices and vectors: the jitter's projection.
         .fluxion_math = .{
-            .url = "git+https://github.com/kisstp2006/fluxion-math#9cf1445d5b19a380f147d1d66609d711f0d7229f",
-            .hash = "fluxion_math-0.3.0-dfpZBZPiBwD77W5yAG32Eb7y0bFvpKxChZcQhspejR_N",
+            .url = "git+https://github.com/kisstp2006/fluxion-math#f66b501c26afc66cbfd3a039222d21d8a0aedfa8",
+            .hash = "fluxion_math-0.3.0-dfpZBebsBwChI84wBiqg5vGYW6RMxVCFWu1pBL0xHex4",
         },
         // For the tests only: the shader parts compiled for every backend,
         // and the GPU side built over a device that draws nothing. A program
